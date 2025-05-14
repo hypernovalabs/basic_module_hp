@@ -14,13 +14,29 @@
         android:layout_height="wrap_content"
         android:textSize="20sp"
         android:text="@string/payment_title"
-        android:layout_marginBottom="32dp"/>
+        android:layout_marginBottom="8dp"/>
+
+    <TextView
+        android:id="@+id/tvCurrentYappyUser"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Usuario Yappy: No configurado"
+        android:textSize="14sp"
+        android:layout_marginBottom="24dp"/>
 
     <Button
         android:id="@+id/btnAcceptPayment"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="@string/accept_payment"
+        android:layout_marginBottom="16dp"/>
+
+    <Button
+        android:id="@+id/btnYappyPayment"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/yappy_payment"
+        android:backgroundTint="#3F51B5"
         android:layout_marginBottom="16dp"/>
 
     <Button

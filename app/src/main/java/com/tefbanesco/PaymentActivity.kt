@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -75,6 +76,7 @@ object ExtraKeys {
 class PaymentActivity : AppCompatActivity() {
 
     private val TAG = "PaymentActivity"
+    private val REQUEST_CODE_YAPPY_PAYMENT = 1001 // Código para identificar resultados de Yappy
 
     // Variables para almacenar datos de la transacción actual
     private var currentTransactionIdHio: Int? = 0
@@ -408,12 +410,17 @@ class PaymentActivity : AppCompatActivity() {
         setContentView(R.layout.activity_payment_ui)
 
         val tvAmount = findViewById<TextView>(R.id.tvAmountInfo)
+        val tvCurrentYappyUser = findViewById<TextView>(R.id.tvCurrentYappyUser)
         val btnAccept = findViewById<Button>(R.id.btnAcceptPayment)
         val btnCancel = findViewById<Button>(R.id.btnCancelPayment)
+        val btnYappy = findViewById<Button>(R.id.btnYappyPayment)
 
         // Formatear el monto para mostrar en la UI - convertir de "1234" a "12.34"
         val formattedAmount = formatAmount(currentAmount!!)
         tvAmount.text = getString(R.string.payment_amount_format, formattedAmount, currentCurrencyIso)
+
+        // Actualizar información del usuario Yappy
+        updateYappyUserDisplay(tvCurrentYappyUser)
 
         btnAccept.setOnClickListener {
             Log.i(TAG, "Pago ACEPTADO por el usuario.")
@@ -424,8 +431,38 @@ class PaymentActivity : AppCompatActivity() {
             Log.i(TAG, "Pago CANCELADO por el usuario.")
             sendTransactionResponse(false, shopDataXml, sellerDataXml)
         }
+
+        // Configurar botón de Yappy - siempre visible
+        btnYappy.visibility = View.VISIBLE
+        btnYappy.setOnClickListener {
+            Log.i(TAG, "Pago con Yappy seleccionado.")
+            handleYappyPayment()
+        }
     }
     
+    /**
+     * Actualiza el TextView que muestra el usuario Yappy actual
+     * @param textView TextView donde mostrar la información
+     */
+    private fun updateYappyUserDisplay(textView: TextView) {
+        // Obtener el nombre de usuario actual
+        val username = com.tefbanesco.storage.YappyLocalStorage.getYappyCurrentUsername(this)
+
+        if (username != null) {
+            textView.text = "Usuario Yappy: $username"
+            textView.visibility = View.VISIBLE
+        } else {
+            // Si no hay usuario configurado, usar el fallback
+            if (com.tefbanesco.yappy.YappyApiConfig.isYappyConfigured(this)) {
+                // Si hay configuración pero no hay username, usar "admin" (fallback)
+                textView.text = "Usuario Yappy: ${com.tefbanesco.yappy.DefaultYappyConfig.FALLBACK_USERNAME}"
+            } else {
+                textView.text = "Usuario Yappy: No configurado"
+            }
+            textView.visibility = View.VISIBLE
+        }
+    }
+
     /**
      * Formatea un monto de "1234" a "12.34" para mostrar en la UI
      *
@@ -527,6 +564,230 @@ class PaymentActivity : AppCompatActivity() {
 //    }
     // Dentro de PaymentActivity.kt
 
+    /**
+     * Maneja el pago con Yappy
+     * Verifica configuración e inicia el flujo de pago
+     */
+    private fun handleYappyPayment() {
+        // Verificar si Yappy está configurado
+        if (!com.tefbanesco.yappy.YappyApiConfig.isYappyConfigured(this)) {
+            // Mostrar diálogo de configuración
+            showYappyConfigScreen()
+            return
+        }
+
+        try {
+            // Convertir el monto a formato Double para Yappy
+            val amount = formatToDouble(currentAmount ?: "0")
+
+            // Iniciar actividad de pago con Yappy
+            val intent = Intent(this, com.tefbanesco.yappy.YappyPaymentActivity::class.java)
+
+            // Pasar los datos relevantes
+            intent.putExtra("amount", amount)
+            intent.putExtra("transactionId", currentTransactionIdHio)
+            intent.putExtra("currencyIso", currentCurrencyIso)
+            intent.putExtra("transactionType", currentTransactionType)
+
+            // Iniciar actividad esperando resultado
+            startActivityForResult(intent, REQUEST_CODE_YAPPY_PAYMENT)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error iniciando pago con Yappy", e)
+            // En caso de error, mostrar mensaje y usar el flujo normal
+            showYappyError("Error iniciando pago con Yappy: ${e.message}")
+        }
+    }
+
+    /**
+     * Muestra la pantalla de configuración de Yappy
+     */
+    private fun showYappyConfigScreen() {
+        try {
+            // Mostrar diálogo de elección entre configuración almacenada o directa
+            com.tefbanesco.yappy.ui.YappyDirectConfigDialog.showConfigurationChoice(
+                context = this,
+                onStoredCredentials = {
+                    // Inicializar con credenciales almacenadas
+                    com.tefbanesco.yappy.YappyServiceFactory.getWithStoredCredentials(this)
+                    Log.d(TAG, "Usando configuración almacenada para Yappy")
+
+                    // Si se configuró correctamente, intentar pago con Yappy de nuevo
+                    if (com.tefbanesco.yappy.YappyApiConfig.isYappyConfigured(this)) {
+                        handleYappyPayment()
+                    } else {
+                        // Si no hay configuración almacenada, mostrar configuración estándar
+                        showYappyStandardConfig()
+                    }
+                },
+                onCustomCredentials = {
+                    // Al guardar configuración personalizada, intentar pago
+                    handleYappyPayment()
+                }
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error mostrando pantalla de configuración", e)
+            showYappyError("Error en la configuración: ${e.message}")
+        }
+    }
+
+    /**
+     * Muestra la pantalla de configuración estándar de Yappy (para compatibilidad)
+     */
+    private fun showYappyStandardConfig() {
+        try {
+            val configManager = com.tefbanesco.yappy.YappyConfigManager()
+            val configScreen = com.tefbanesco.yappy.ui.YappyConfigScreen(
+                context = this,
+                lifecycleOwner = this,
+                configManager = configManager,
+                onSaveSuccess = {
+                    // Si se guardó correctamente, intentar pago con Yappy de nuevo
+                    if (com.tefbanesco.yappy.YappyApiConfig.isYappyConfigured(this)) {
+                        handleYappyPayment()
+                    } else {
+                        showYappyError("Configuración guardada pero incompleta")
+                    }
+                },
+                onCancel = {
+                    // Si canceló, volvemos al flujo normal
+                    Log.d(TAG, "Configuración de Yappy cancelada")
+                }
+            )
+            configScreen.show()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error mostrando pantalla de configuración estándar", e)
+            showYappyError("Error en la configuración: ${e.message}")
+        }
+    }
+
+    /**
+     * Convierte un monto de formato "1234" a Double (12.34)
+     */
+    private fun formatToDouble(amountStr: String): Double {
+        try {
+            val amount = amountStr.trim().toInt()
+            return amount / 100.0
+        } catch (e: Exception) {
+            Log.e(TAG, "Error convirtiendo monto a Double", e)
+            return 0.0
+        }
+    }
+
+    /**
+     * Muestra un error relacionado con Yappy
+     */
+    private fun showYappyError(message: String) {
+        Log.e(TAG, "Error Yappy: $message")
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Error en pago Yappy")
+            .setMessage(message)
+            .setPositiveButton("Aceptar") { dialog, _ ->
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    /**
+     * Recibe resultados de actividad Yappy
+     */
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode == REQUEST_CODE_YAPPY_PAYMENT) {
+            when (resultCode) {
+                Activity.RESULT_OK -> {
+                    // Pago exitoso
+                    val yappyTransactionId = data?.getStringExtra("yappyTransactionId") ?: ""
+                    val localOrderId = data?.getStringExtra("localOrderId") ?: ""
+
+                    Log.i(TAG, "Pago Yappy exitoso. YappyId: $yappyTransactionId, LocalId: $localOrderId")
+
+                    // Enviar respuesta a HioPosCloud
+                    sendTransactionResponseYappy(
+                        accepted = true,
+                        yappyTransactionId = yappyTransactionId,
+                        localOrderId = localOrderId
+                    )
+                }
+                Activity.RESULT_CANCELED -> {
+                    // Pago cancelado o fallido
+                    val errorMessage = data?.getStringExtra("errorMessage") ?: "Pago cancelado"
+
+                    Log.i(TAG, "Pago Yappy fallido: $errorMessage")
+
+                    // Enviar respuesta a HioPosCloud
+                    sendTransactionResponseYappy(
+                        accepted = false,
+                        errorMessage = errorMessage
+                    )
+                }
+                else -> {
+                    // Resultado desconocido
+                    Log.e(TAG, "Resultado desconocido en pago Yappy: $resultCode")
+                    sendTransactionResponseYappy(
+                        accepted = false,
+                        errorMessage = "Error desconocido en pago Yappy"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Envía respuesta a HioPosCloud con datos de Yappy
+     */
+    private fun sendTransactionResponseYappy(
+        accepted: Boolean,
+        yappyTransactionId: String = "",
+        localOrderId: String = "",
+        errorMessage: String = ""
+    ) {
+        val resultIntent = Intent(ACTION_TRANSACTION)
+
+        // Parámetros comunes
+        resultIntent.putExtra(ExtraKeys.TRANSACTION_TYPE, currentTransactionType)
+        resultIntent.putExtra(ExtraKeys.AMOUNT, currentAmount)
+
+        // TransactionData específico para Yappy
+        val moduleTransactionId = localOrderId.ifEmpty { "YAPPY_ID_${System.currentTimeMillis()}" }
+        val transactionDataModule = """
+        {
+            "module_id": "$moduleTransactionId",
+            "yappy_id": "$yappyTransactionId",
+            "hio_id": "$currentTransactionIdHio",
+            "status": "${if (accepted) "ACCEPTED" else "FAILED"}",
+            "payment_method": "YAPPY",
+            "timestamp": "${System.currentTimeMillis()}"
+        }
+        """.trimIndent().replace("\n", "")
+        resultIntent.putExtra(ExtraKeys.TRANSACTION_DATA_MODULE, transactionDataModule)
+
+        if (accepted) {
+            resultIntent.putExtra(ExtraKeys.TRANSACTION_RESULT, "ACCEPTED")
+            resultIntent.putExtra(ExtraKeys.AUTHORIZATION_ID, "YAPPY_$yappyTransactionId")
+            resultIntent.putExtra(ExtraKeys.CARD_HOLDER, "CLIENTE YAPPY")
+            resultIntent.putExtra(ExtraKeys.CARD_TYPE, "YAPPY_QR")
+            resultIntent.putExtra(ExtraKeys.CARD_NUM, "**** **** **** YAPP")
+            Log.i(TAG, "Enviando respuesta TRANSACTION (Yappy): ACCEPTED")
+        } else {
+            resultIntent.putExtra(ExtraKeys.TRANSACTION_RESULT, "FAILED")
+            resultIntent.putExtra(ExtraKeys.ERROR_MESSAGE, errorMessage)
+            resultIntent.putExtra(ExtraKeys.ERROR_MESSAGE_TITLE, "Error en Pago Yappy")
+            Log.i(TAG, "Enviando respuesta TRANSACTION (Yappy): FAILED")
+        }
+
+        // Logging de respuesta
+        logTransactionResponse(resultIntent)
+
+        // Enviar respuesta
+        setResult(Activity.RESULT_OK, resultIntent)
+        finish()
+    }
+
+    /**
+     * Envía respuesta estándar a HioPosCloud
+     */
     private fun sendTransactionResponse(accepted: Boolean, shopDataXml: String?, sellerDataXml: String?) {
         val resultIntent = Intent(ACTION_TRANSACTION) // Acción filtrada
 
@@ -541,6 +802,7 @@ class PaymentActivity : AppCompatActivity() {
             "module_id": "$moduleTransactionId",
             "hio_id": "$currentTransactionIdHio",
             "status": "${if (accepted) "ACCEPTED" else "FAILED"}",
+            "payment_method": "STANDARD",
             "timestamp": "${System.currentTimeMillis()}"
         }
     """.trimIndent().replace("\n", "")
@@ -576,14 +838,23 @@ class PaymentActivity : AppCompatActivity() {
             Log.i(TAG, "Enviando respuesta TRANSACTION: ACCEPTED")
         } else {
             resultIntent.putExtra(ExtraKeys.TRANSACTION_RESULT, "FAILED")
-            // Asegúrate de tener estas strings definidas en tu archivo strings.xml
-            // o reemplázalas con los strings literales como estaban antes si prefieres.
             resultIntent.putExtra(ExtraKeys.ERROR_MESSAGE, getString(R.string.error_payment_canceled))
             resultIntent.putExtra(ExtraKeys.ERROR_MESSAGE_TITLE, getString(R.string.error_payment_canceled_title))
             Log.i(TAG, "Enviando respuesta TRANSACTION: FAILED")
         }
 
-        // --- INICIO: Bloque de Logging del Intent de Salida ---
+        // Logging de respuesta
+        logTransactionResponse(resultIntent)
+
+        // IMPORTANTE: HioPosCloud espera RESULT_OK incluso si la transacción (TransactionResult) es FAILED.
+        setResult(Activity.RESULT_OK, resultIntent)
+        finish() // Finalizar la activity de UI para volver a HioPosCloud
+    }
+
+    /**
+     * Registra en el log la respuesta que se enviará a HioPosCloud
+     */
+    private fun logTransactionResponse(resultIntent: Intent) {
         val responseLogTag = "RESPONSE_TO_HIOPOS" // Un tag específico para estos logs
         Log.i(responseLogTag, "--------------------------------------------------------------------------")
         Log.i(responseLogTag, "Enviando respuesta a HioPosCloud. Acción: ${resultIntent.action}")
@@ -597,9 +868,9 @@ class PaymentActivity : AppCompatActivity() {
                     val value = bundle.get(key)
                     val valueString = value?.toString() ?: "null"
 
-                    // Para XMLs o JSONs largos, podríamos querer un tratamiento especial,
-                    // pero por ahora imprimimos todo. Logcat puede truncar líneas muy largas.
-                    if (valueString.length > 300 && (key == ExtraKeys.SHOP_DATA || key == ExtraKeys.SELLER_DATA || key == ExtraKeys.DOCUMENT_DATA || key == ExtraKeys.TRANSACTION_DATA_MODULE)) {
+                    // Para XMLs o JSONs largos, podríamos querer un tratamiento especial
+                    if (valueString.length > 300 && (key == ExtraKeys.SHOP_DATA || key == ExtraKeys.SELLER_DATA ||
+                                                   key == ExtraKeys.DOCUMENT_DATA || key == ExtraKeys.TRANSACTION_DATA_MODULE)) {
                         Log.d(responseLogTag, "  Key: '$key' (XML/JSON largo, mostrando inicio y fin):")
                         Log.d(responseLogTag, "    ${valueString.take(150)} ... ${valueString.takeLast(150)}")
                     } else {
@@ -609,10 +880,5 @@ class PaymentActivity : AppCompatActivity() {
             }
         } ?: Log.i(responseLogTag, "El Intent de salida no tiene extras (bundle es null).")
         Log.i(responseLogTag, "--------------------------------------------------------------------------")
-        // --- FIN: Bloque de Logging del Intent de Salida ---
-
-        // IMPORTANTE: HioPosCloud espera RESULT_OK incluso si la transacción (TransactionResult) es FAILED.
-        setResult(Activity.RESULT_OK, resultIntent)
-        finish() // Finalizar la activity de UI para volver a HioPosCloud
     }
 }

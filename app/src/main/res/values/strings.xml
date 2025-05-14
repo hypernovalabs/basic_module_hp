@@ -11,4 +11,15 @@
     <string name="error_parameters_missing">Parámetros de entrada incompletos o inválidos: %1$s</string>
     <string name="error_payment_canceled">Pago cancelado por el usuario desde el módulo TEFBanesco.</string>
     <string name="error_payment_canceled_title">Pago Cancelado</string>
+
+    <!-- Strings para Yappy -->
+    <string name="yappy_payment">Pagar con Yappy QR</string>
+    <string name="yappy_cancel">Cancelar Pago</string>
+    <string name="yappy_title">Pago con Yappy QR</string>
+    <string name="yappy_scanning">Conectando con Yappy...</string>
+    <string name="yappy_scan_qr">Escanee el código QR con Yappy</string>
+    <string name="yappy_amount_format">Monto: $%1$.2f</string>
+    <string name="yappy_success">¡Pago completado con éxito!</string>
+    <string name="yappy_error_title">Error en pago Yappy</string>
+    <string name="yappy_cancelling">Cancelando pago...</string>
 </resources>
